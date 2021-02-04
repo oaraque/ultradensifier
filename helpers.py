@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
-from __future__ import print_function
-from __future__ import division
-
+import os
 from six.moves import xrange
 from sys import exit
 from multiprocessing import Pool
 
 import numpy as np
+import pandas as pd
 import scipy
 import math
+import gensim.downloader as api
 
 
 def normalizer(myvector):
@@ -69,3 +69,26 @@ def word2vec(emb_path):
         if p[0] is not None:
             _pairs.append(p)
     return dict(_pairs)
+
+def load_embeddings(emb):
+    model = api.load('glove-wiki-gigaword-50')
+    model.init_sims(replace=True)
+    emb_dim = model.vectors_norm.shape[1]
+    emb_dict = dict(zip(model.index2word, model.vectors_norm))
+    emb_vocab = model.index2word
+    emb_vectors = model.vectors_norm
+    return emb_dict, emb_dim, emb_vocab, emb_vectors
+
+
+def read_lexicon_file(path, category):
+    words = list()
+    with open(os.path.join(path, '{}.txt'.format(category)), 'r') as f:
+        lines = f.readlines()
+    for line in lines:
+        words.append(line.strip())
+    return words
+
+def load_lexicon(path):
+    pos = read_lexicon_file(path, 'pos')
+    neg = read_lexicon_file(path, 'neg')
+    return pos, neg

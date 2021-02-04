@@ -1,12 +1,10 @@
-from __future__ import print_function
-from __future__ import division
-
 import os
 import itertools
 import sys
 import random
+import pickle
 
-random.seed(3)
+random.seed(42)
 os.environ["MKL_NUM_THREADS"] = "40"
 os.environ["NUMEXPR_NUM_THREADS"] = "40"
 os.environ["OMP_NUM_THREADS"] = "40"
@@ -43,7 +41,7 @@ def batches(it, size):
 
 
 class Densifier(object):
-    def __init__(self, alpha, d, ds, lr, batch_size, seed=3):
+    def __init__(self, alpha, d, ds, lr, batch_size, seed=42):
         self.d = d
         self.ds = ds
         self.Q = np.matrix(scipy.stats.ortho_group.rvs(d, random_state=seed))
@@ -115,7 +113,7 @@ class Densifier(object):
                         print (np.mean(steps_same_loss))
                         print (self.lr)
                     steps_same_loss, steps_diff_loss = [], []
-                if steps_orth % sys.maxint == 0:
+                if steps_orth % sys.maxsize == 0:
                     self.Q = Densifier.make_orth(self.Q)
                 if save_step % save_every == 0:
                     self.save(save_to)
@@ -126,7 +124,7 @@ class Densifier(object):
         self.save(save_to)
 
     def save(self, save_to):
-        with open(save_to, "w") as f:
+        with open(save_to, "wb") as f:
             pickle.dump(self.__dict__, f)
         print ("Trained model saved ...")
 
@@ -135,34 +133,50 @@ class Densifier(object):
         U, _, V = np.linalg.svd(Q)
         return U * V
 
+    def transform(self, E):
+        transformed = np.dot(self.P, np.dot(self.Q, E.T))
+        return transformed
+
+    def save_transformed(self, path, transformed, emb_vocab):
+        transformed = np.squeeze(np.array(transformed))
+        pd.Series(index=emb_vocab, data=transformed).to_csv(path, sep='\t', header=None)
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--LR", type=float, default=5.)
+    parser.add_argument("--lr", type=float, default=5.)
     parser.add_argument("--alpha", type=float, default=.5)
-    parser.add_argument("--EPC", type=int, default=2)
-    parser.add_argument("--OUT_DIM", type=int, default=1)
-    parser.add_argument("--BATCH_SIZE", type=int, default=100)
-    parser.add_argument("--EMB_SPACE", type=str, default="embeddings/twitter_emb_400.vec")
-    parser.add_argument("--SAVE_EVERY", type=int, default=1000)
-    parser.add_argument("--SAVE_TO", type=str, default="trained_densifier.pkl")
+    parser.add_argument("--epochs", type=int, default=2)
+    parser.add_argument("--out_dim", type=int, default=1)
+    parser.add_argument("--batch-size", type=int, default=100)
+    parser.add_argument("--emb-space", type=str)
+    parser.add_argument("--lexicon", type=str)
+    parser.add_argument("--save-every", type=int, default=1000)
+    parser.add_argument("--save-to", type=str, default="trained_densifier.pck")
+    parser.add_argument("--save-lexicon", type=str, default="transformed_lexicon.tsv")
     args = parser.parse_args()
 
-    pos_words, neg_words = parse_words(add_bib=False)
-    myword2vec = word2vec(args.EMB_SPACE)
+    # pos_words, neg_words = parse_words(add_bib=False)
+    pos_words, neg_words = load_lexicon(args.lexicon)
+
+    ## load word embedding
+    # myword2vec = word2vec(args.EMB_SPACE)
+    emb, emb_dim, emb_vocab, emb_vectors = load_embeddings(args.emb_space)
     print ("Finish loading embedding ...")
 
     map(lambda x: random.shuffle(x), [pos_words, neg_words])
-    pos_vecs, neg_vecs = map(lambda x: emblookup(x, myword2vec), [pos_words, neg_words])
+    pos_vecs, neg_vecs = map(lambda x: emblookup(x, emb), [pos_words, neg_words])
 
     assert len(pos_vecs) > 0
     assert len(neg_vecs) > 0
-    mydensifier = Densifier(400, args.OUT_DIM, args.LR, args.BATCH_SIZE)
-    mydensifier.train(args.EPC,
-                      args.alpha,
+    mydensifier = Densifier(args.alpha, emb_dim, args.out_dim, args.lr, args.batch_size)
+    mydensifier.train(args.epochs,
                       pos_vecs,
                       neg_vecs,
-                      args.SAVE_TO,
-                      args.SAVE_EVERY)
+                      args.save_to,
+                      args.save_every)
+
+    transformed = mydensifier.transform(emb_vectors)
+    mydensifier.save_transformed(args.save_lexicon, transformed, emb_vocab)
+
